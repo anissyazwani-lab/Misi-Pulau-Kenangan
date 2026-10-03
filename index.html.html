@@ -1,0 +1,1305 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bercuti di Pantai - Kembara Bahasa Melayu & Side Game</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Canvas Confetti Library -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&family=Nunito:wght@600;700;800&display=swap');
+        
+        body {
+            font-family: 'Nunito', sans-serif;
+            background: linear-gradient(180deg, #38bdf8 0%, #7dd3fc 35%, #fef08a 70%, #fde047 100%);
+            min-height: 100vh;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        .font-fredoka { font-family: 'Fredoka', cursive; }
+
+        /* Animated Clouds */
+        .cloud {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.85);
+            border-radius: 50px;
+            animation: moveClouds 25s linear infinite;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        @keyframes moveClouds {
+            0% { transform: translateX(-150px); }
+            100% { transform: translateX(100vw); }
+        }
+
+        /* Floating Animation */
+        .floating {
+            animation: float 3.5s ease-in-out infinite;
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            50% { transform: translateY(-8px) rotate(3deg); }
+        }
+
+        /* Character Animations for Side Game */
+        .char-jump {
+            animation: jumpHappy 0.6s ease-in-out;
+        }
+        @keyframes jumpHappy {
+            0%, 100% { transform: translateY(0) scale(1); }
+            50% { transform: translateY(-28px) scale(1.2) rotate(6deg); }
+        }
+
+        .char-fall {
+            animation: fallAduh 0.8s ease-in-out;
+        }
+        @keyframes fallAduh {
+            0% { transform: translateY(0) rotate(0deg); }
+            25% { transform: translateY(-10px) rotate(-20deg); }
+            60% { transform: translateY(20px) rotate(80deg) scale(0.9); }
+            100% { transform: translateY(0) rotate(0deg) scale(1); }
+        }
+
+        /* Screen Shake on Incorrect Answer */
+        .shake-screen {
+            animation: shake 0.4s ease-in-out;
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20% { transform: translateX(-10px); }
+            40% { transform: translateX(10px); }
+            60% { transform: translateX(-6px); }
+            80% { transform: translateX(6px); }
+        }
+
+        /* Water Splash Effect CSS */
+        .splash-ring {
+            position: absolute;
+            width: 40px;
+            height: 15px;
+            border: 3px solid #0284c7;
+            border-radius: 50%;
+            animation: splashAnim 0.6s ease-out forwards;
+            pointer-events: none;
+        }
+        @keyframes splashAnim {
+            0% { transform: scale(0.2); opacity: 1; }
+            100% { transform: scale(2.2); opacity: 0; }
+        }
+
+        .card-bounce {
+            transition: all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .card-bounce:hover {
+            transform: translateY(-5px) scale(1.02);
+        }
+
+        /* Print styling for Certificate */
+        @media print {
+            body {
+                background: white !important;
+            }
+            body * {
+                visibility: hidden;
+            }
+            #certificatePrintArea, #certificatePrintArea * {
+                visibility: visible;
+            }
+            #certificatePrintArea {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+                margin: 0;
+                padding: 20px;
+                box-shadow: none !important;
+            }
+            .no-print {
+                display: none !important;
+            }
+        }
+    </style>
+
+    <script>
+        // Global Game State Variables
+        window.currentStep = 0;
+        window.totalSteps = 6;
+        window.score = 0;
+        window.stars = 0;
+        window.currentMode = 'listening'; // 'listening', 'speaking', 'mixed'
+        window.activeQuestions = [];
+        window.isRecognizing = false;
+        window.recognition = null;
+        window.audioCtx = null;
+        window.isBeachSoundPlaying = false;
+        window.beachAudioSource = null;
+
+        window.getMalayVoice = function() {
+            if (!('speechSynthesis' in window)) return null;
+            const voices = window.speechSynthesis.getVoices();
+            if (!voices || voices.length === 0) return null;
+
+            // Priority 1: Malay Malaysia (ms-MY / ms_MY)
+            let chosen = voices.find(v => v.lang && (v.lang.toLowerCase() === 'ms-my' || v.lang.toLowerCase() === 'ms_my'));
+            if (chosen) return chosen;
+
+            // Priority 2: Any voice containing 'ms', 'melayu', or 'malay'
+            chosen = voices.find(v => (v.lang && v.lang.toLowerCase().startsWith('ms')) ||
+                                      (v.name && v.name.toLowerCase().includes('malay')) ||
+                                      (v.name && v.name.toLowerCase().includes('melayu')));
+            if (chosen) return chosen;
+
+            // Priority 3: Indonesian (id-ID) fallback (very clear phonetics close to Malay)
+            chosen = voices.find(v => v.lang && v.lang.toLowerCase().startsWith('id'));
+            if (chosen) return chosen;
+
+            return null;
+        };
+
+        window.listeningQuestionsBank = [
+            {
+                type: 'listening',
+                audioText: "Kami membina istana pasir yang tinggi di tepi pantai.",
+                instruction: "Dengar petunjuk audio & pilih gambar yang betul:",
+                options: [
+                    { emoji: "🏰🏖️", label: "Membina istana pasir", correct: true },
+                    { emoji: "🛥️🌊", label: "Naik bot laju", correct: false },
+                    { emoji: "🍉🧺", label: "Berkelah makan tembikai", correct: false }
+                ]
+            },
+            {
+                type: 'listening',
+                audioText: "Ibu dan kakak makan tembikai manis semasa berkelah di bawah payung pantai.",
+                instruction: "Dengar petunjuk audio & pilih gambar yang betul:",
+                options: [
+                    { emoji: "🐚🏝️", label: "Mengumpul cengkerang", correct: false },
+                    { emoji: "🍉☂️", label: "Berkelah makan tembikai", correct: true },
+                    { emoji: "🪁💨", label: "Bermain layang-layang", correct: false }
+                ]
+            },
+            {
+                type: 'listening',
+                audioText: "Adik bermain layang-layang yang terbang tinggi ditiup angin pantai.",
+                instruction: "Dengar petunjuk audio & pilih gambar yang betul:",
+                options: [
+                    { emoji: "🪁💨", label: "Bermain layang-layang", correct: true },
+                    { emoji: "🤿🏊‍♂️", label: "Berenang di laut", correct: false },
+                    { emoji: "🏰🏖️", label: "Membina istana pasir", correct: false }
+                ]
+            },
+            {
+                type: 'listening',
+                audioText: "Ayah dan abang menaiki bot laju sambil memakai jaket keselamatan.",
+                instruction: "Dengar petunjuk audio & pilih gambar yang betul:",
+                options: [
+                    { emoji: "🍉🧺", label: "Berkelah makan tembikai", correct: false },
+                    { emoji: "🛥️🤿", label: "Naik bot laju", correct: true },
+                    { emoji: "🐚🏝️", label: "Mengumpul cengkerang", correct: false }
+                ]
+            },
+            {
+                type: 'listening',
+                audioText: "Kami sekeluarga mengumpul cengkerang yang cantik di sepanjang pesisir pantai.",
+                instruction: "Dengar petunjuk audio & pilih gambar yang betul:",
+                options: [
+                    { emoji: "🐚🏝️", label: "Mengumpul cengkerang", correct: true },
+                    { emoji: "🏰🏖️", label: "Membina istana pasir", correct: false },
+                    { emoji: "🤿🏊‍♂️", label: "Berenang di laut", correct: false }
+                ]
+            },
+            {
+                type: 'listening',
+                audioText: "Saya dan adik berenang gembira menggunakan pelampung warna-warni di laut.",
+                instruction: "Dengar petunjuk audio & pilih gambar yang betul:",
+                options: [
+                    { emoji: "🪁💨", label: "Bermain layang-layang", correct: false },
+                    { emoji: "🤿🏊‍♂️", label: "Berenang guna pelampung", correct: true },
+                    { emoji: "🛥️🤿", label: "Naik bot laju", correct: false }
+                ]
+            }
+        ];
+
+        window.speakingQuestionsBank = [
+            {
+                type: 'speaking',
+                instruction: "Sebutkan ayat pantai di bawah dengan jelas:",
+                emoji: "🏰🏖️",
+                targetPhrase: "Saya membina istana pasir yang tinggi.",
+                keywords: ["membina", "istana", "pasir", "tinggi"]
+            },
+            {
+                type: 'speaking',
+                instruction: "Sebutkan ayat aktiviti renang di pantai:",
+                emoji: "🤿🏊‍♂️",
+                targetPhrase: "Saya berenang guna pelampung di laut.",
+                keywords: ["berenang", "pelampung", "laut", "guna"]
+            },
+            {
+                type: 'speaking',
+                instruction: "Sebutkan ayat hobi mengumpul cengkerang:",
+                emoji: "🐚🏝️",
+                targetPhrase: "Kami mengumpul cengkerang di tepi pantai.",
+                keywords: ["mengumpul", "cengkerang", "pantai", "tepi"]
+            },
+            {
+                type: 'speaking',
+                instruction: "Sebutkan ayat permainan layang-layang:",
+                emoji: "🪁💨",
+                targetPhrase: "Adik gembira bermain layang-layang.",
+                keywords: ["adik", "gembira", "layang-layang", "bermain"]
+            },
+            {
+                type: 'speaking',
+                instruction: "Sebutkan keselamatan di atas bot:",
+                emoji: "🛥️️🤿",
+                targetPhrase: "Kita mesti memakai jaket keselamatan di atas bot.",
+                keywords: ["memakai", "jaket", "keselamatan", "bot"]
+            },
+            {
+                type: 'speaking',
+                instruction: "Sebutkan ayat kegembiraan percutian:",
+                emoji: "🏝️🎉",
+                targetPhrase: "Seronoknya berkelah dan makan tembikai di pantai!",
+                keywords: ["seronoknya", "berkelah", "tembikai", "pantai"]
+            }
+        ];
+
+        window.initAudioContext = function() {
+            try {
+                if (!window.audioCtx) {
+                    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                    if (AudioContextClass) {
+                        window.audioCtx = new AudioContextClass();
+                    }
+                }
+                if (window.audioCtx && window.audioCtx.state === 'suspended') {
+                    window.audioCtx.resume();
+                }
+            } catch (e) {
+                console.warn("Audio Context init error:", e);
+            }
+        };
+
+        window.playSoundEffect = function(type) {
+            try {
+                window.initAudioContext();
+                if (!window.audioCtx) return;
+
+                const now = window.audioCtx.currentTime;
+
+                if (type === 'correct') {
+                    const freqs = [523.25, 659.25, 783.99, 1046.50];
+                    freqs.forEach((f, index) => {
+                        const osc = window.audioCtx.createOscillator();
+                        const gain = window.audioCtx.createGain();
+                        osc.type = 'sine';
+                        osc.frequency.setValueAtTime(f, now + index * 0.1);
+                        gain.gain.setValueAtTime(0.2, now + index * 0.1);
+                        gain.gain.exponentialRampToValueAtTime(0.001, now + index * 0.1 + 0.3);
+                        osc.connect(gain);
+                        gain.connect(window.audioCtx.destination);
+                        osc.start(now + index * 0.1);
+                        osc.stop(now + index * 0.1 + 0.3);
+                    });
+                } else if (type === 'wrong') {
+                    const osc = window.audioCtx.createOscillator();
+                    const gain = window.audioCtx.createGain();
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(220, now);
+                    osc.frequency.exponentialRampToValueAtTime(110, now + 0.3);
+                    gain.gain.setValueAtTime(0.3, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+                    osc.connect(gain);
+                    gain.connect(window.audioCtx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.3);
+                } else if (type === 'splash') {
+                    const bufferSize = window.audioCtx.sampleRate * 0.4;
+                    const buffer = window.audioCtx.createBuffer(1, bufferSize, window.audioCtx.sampleRate);
+                    const output = buffer.getChannelData(0);
+                    for (let i = 0; i < bufferSize; i++) {
+                        output[i] = Math.random() * 2 - 1;
+                    }
+
+                    const noise = window.audioCtx.createBufferSource();
+                    noise.buffer = buffer;
+
+                    const filter = window.audioCtx.createBiquadFilter();
+                    filter.type = 'lowpass';
+                    filter.frequency.setValueAtTime(800, now);
+                    filter.frequency.exponentialRampToValueAtTime(100, now + 0.4);
+
+                    const gain = window.audioCtx.createGain();
+                    gain.gain.setValueAtTime(0.3, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+
+                    noise.connect(filter);
+                    filter.connect(gain);
+                    gain.connect(window.audioCtx.destination);
+
+                    noise.start(now);
+                    noise.stop(now + 0.4);
+                } else if (type === 'star') {
+                    const freqs = [659.25, 880, 1174.66, 1318.51];
+                    freqs.forEach((f, i) => {
+                        const osc = window.audioCtx.createOscillator();
+                        const gain = window.audioCtx.createGain();
+                        osc.type = 'triangle';
+                        osc.frequency.setValueAtTime(f, now + i * 0.08);
+                        gain.gain.setValueAtTime(0.2, now + i * 0.08);
+                        gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.08 + 0.25);
+                        osc.connect(gain);
+                        gain.connect(window.audioCtx.destination);
+                        osc.start(now + i * 0.08);
+                        osc.stop(now + i * 0.08 + 0.25);
+                    });
+                }
+            } catch (e) {
+                console.log("Audio effect error: ", e);
+            }
+        };
+
+        window.toggleBeachAmbient = function() {
+            window.initAudioContext();
+            if (!window.audioCtx) return;
+
+            const icon = document.getElementById('beachSoundIcon');
+
+            if (window.isBeachSoundPlaying) {
+                if (window.beachAudioSource) {
+                    try { window.beachAudioSource.stop(); } catch(e){}
+                    window.beachAudioSource = null;
+                }
+                window.isBeachSoundPlaying = false;
+                if (icon) icon.className = "fa-solid fa-volume-xmark text-base";
+                window.showToast("Bunyi ombak ditutup", "🔇", "error");
+            } else {
+                try {
+                    const bufferSize = window.audioCtx.sampleRate * 5;
+                    const buffer = window.audioCtx.createBuffer(1, bufferSize, window.audioCtx.sampleRate);
+                    const data = buffer.getChannelData(0);
+                    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+
+                    for (let i = 0; i < bufferSize; i++) {
+                        const white = Math.random() * 2 - 1;
+                        b0 = 0.99886 * b0 + white * 0.0555179;
+                        b1 = 0.99332 * b1 + white * 0.0750759;
+                        b2 = 0.96900 * b2 + white * 0.1538520;
+                        b3 = 0.86650 * b3 + white * 0.3104856;
+                        b4 = 0.55000 * b4 + white * 0.5329522;
+                        b5 = -0.7616 * b5 - white * 0.0168980;
+                        data[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.04;
+                        b6 = white * 0.115926;
+                    }
+
+                    window.beachAudioSource = window.audioCtx.createBufferSource();
+                    window.beachAudioSource.buffer = buffer;
+                    window.beachAudioSource.loop = true;
+
+                    const filter = window.audioCtx.createBiquadFilter();
+                    filter.type = 'lowpass';
+                    filter.frequency.value = 400;
+
+                    const gain = window.audioCtx.createGain();
+                    gain.gain.value = 0.15;
+
+                    window.beachAudioSource.connect(filter);
+                    filter.connect(gain);
+                    gain.connect(window.audioCtx.destination);
+
+                    window.beachAudioSource.start();
+                    window.isBeachSoundPlaying = true;
+                    if (icon) icon.className = "fa-solid fa-volume-high text-base text-sky-600 animate-pulse";
+                    window.showToast("Bunyi ombak dipasang", "🌊", "success");
+                } catch (err) {
+                    console.warn("Error starting beach ambient sound:", err);
+                }
+            }
+        };
+
+        window.initSpeechRecognition = function() {
+            try {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                if (!SpeechRecognition) {
+                    console.warn('Web Speech Recognition API tidak disokong pada pelayar ini.');
+                    return;
+                }
+
+                window.recognition = new SpeechRecognition();
+                window.recognition.lang = 'ms-MY';
+                window.recognition.continuous = false;
+                window.recognition.interimResults = false;
+
+                window.recognition.onstart = function() {
+                    window.isRecognizing = true;
+                    const micIcon = document.getElementById('micIcon');
+                    if (micIcon) micIcon.className = 'fa-solid fa-microphone-lines text-amber-300 animate-pulse';
+                    const statusElem = document.getElementById('micStatusText');
+                    if (statusElem) statusElem.innerText = 'Mendengar... Sila sebut sekarang!';
+                    const btnRec = document.getElementById('btnStartRec');
+                    if (btnRec) btnRec.classList.add('ring-4', 'ring-rose-300');
+                };
+
+                window.recognition.onresult = function(event) {
+                    window.isRecognizing = false;
+                    window.resetMicUI();
+                    if (event.results && event.results[0] && event.results[0][0]) {
+                        const transcript = event.results[0][0].transcript.toLowerCase().trim();
+                        const outputDiv = document.getElementById('recognizedResult');
+                        const textSpan = document.getElementById('speechTextOutput');
+                        if (outputDiv && textSpan) {
+                            outputDiv.classList.remove('hidden');
+                            textSpan.innerText = transcript;
+                        }
+                        window.evaluateSpokenPhrase(transcript);
+                    }
+                };
+
+                window.recognition.onerror = function() {
+                    window.isRecognizing = false;
+                    window.resetMicUI();
+                    window.showToast('Suara tidak dapat dikesan. Sila guna butang simulasi di bawah.', '⚠️', 'error');
+                };
+
+                window.recognition.onend = function() {
+                    window.isRecognizing = false;
+                    window.resetMicUI();
+                };
+            } catch (e) {
+                console.warn("Speech recognition init error:", e);
+            }
+        };
+
+        window.resetMicUI = function() {
+            const micIcon = document.getElementById('micIcon');
+            if (micIcon) micIcon.className = 'fa-solid fa-microphone';
+            const micStatus = document.getElementById('micStatusText');
+            if (micStatus) micStatus.innerText = 'Tekan mikrofon & bercakap';
+            const btnRec = document.getElementById('btnStartRec');
+            if (btnRec) btnRec.classList.remove('ring-4', 'ring-rose-300');
+        };
+
+        window.toggleSpeechRecognition = function() {
+            window.initAudioContext();
+            if (!window.recognition) {
+                window.initSpeechRecognition();
+            }
+
+            if (!window.recognition) {
+                window.showToast('Pelayar ini tidak menyokong mikrofon. Gunakan butang simulasi di bawah.', '⚠️', 'error');
+                return;
+            }
+
+            if (window.isRecognizing) {
+                try { window.recognition.stop(); } catch(e){}
+            } else {
+                try {
+                    window.recognition.start();
+                } catch (e) {
+                    console.log("Speech recognition error: ", e);
+                }
+            }
+        };
+
+        window.evaluateSpokenPhrase = function(transcript) {
+            const qData = window.activeQuestions[window.currentStep];
+            if (!qData || !qData.keywords) return;
+
+            let matchedCount = 0;
+            qData.keywords.forEach(kw => {
+                if (transcript.includes(kw.toLowerCase())) {
+                    matchedCount++;
+                }
+            });
+
+            if (matchedCount >= Math.min(2, qData.keywords.length)) {
+                window.onAnswerSuccess("Sebutan sangat baik & tepat! Watak maju ke depan!");
+            } else {
+                window.onAnswerFailure("Aduh! Sebutan kurang jelas. Watak tergelincir!");
+            }
+        };
+
+        window.simulateSpeechResult = function() {
+            const qData = window.activeQuestions[window.currentStep];
+            if (!qData) return;
+
+            const outputDiv = document.getElementById('recognizedResult');
+            const textSpan = document.getElementById('speechTextOutput');
+            if (outputDiv && textSpan) {
+                outputDiv.classList.remove('hidden');
+                textSpan.innerText = qData.targetPhrase;
+            }
+
+            window.onAnswerSuccess("Simulasi sebutan berjaya! Watak maju ke depan!");
+        };
+
+        window.showModeSelect = function() {
+            const screenMode = document.getElementById('screenModeSelect');
+            const gamePlay = document.getElementById('gamePlayArea');
+            const screenRes = document.getElementById('screenResult');
+
+            if (screenMode) screenMode.classList.remove('hidden');
+            if (gamePlay) gamePlay.classList.add('hidden');
+            if (screenRes) screenRes.classList.add('hidden');
+        };
+
+        window.selectGameMode = function(mode) {
+            window.initAudioContext();
+            window.currentMode = mode;
+            window.currentStep = 0;
+            window.score = 0;
+            window.stars = 0;
+
+            const scoreElem = document.getElementById('scoreCount');
+            const starElem = document.getElementById('starCount');
+            if (scoreElem) scoreElem.innerText = window.score;
+            if (starElem) starElem.innerText = window.stars;
+
+            const modeTitleBadge = document.getElementById('modeTitleBadge');
+
+            if (mode === 'listening') {
+                window.activeQuestions = [...window.listeningQuestionsBank];
+                if (modeTitleBadge) modeTitleBadge.innerText = '🎧 Mod Kemahiran Mendengar';
+            } else if (mode === 'speaking') {
+                window.activeQuestions = [...window.speakingQuestionsBank];
+                if (modeTitleBadge) modeTitleBadge.innerText = '🗣️ Mod Kemahiran Bertutur';
+            } else {
+                window.activeQuestions = [
+                    window.listeningQuestionsBank[0],
+                    window.speakingQuestionsBank[0],
+                    window.listeningQuestionsBank[1],
+                    window.speakingQuestionsBank[1],
+                    window.listeningQuestionsBank[2],
+                    window.speakingQuestionsBank[2]
+                ];
+                if (modeTitleBadge) modeTitleBadge.innerText = '🔀 Mod Campuran Mendengar & Bertutur';
+            }
+
+            window.totalSteps = window.activeQuestions.length;
+            const totalStepElem = document.getElementById('totalStepNum');
+            if (totalStepElem) totalStepElem.innerText = window.totalSteps;
+
+            const screenMode = document.getElementById('screenModeSelect');
+            const gamePlay = document.getElementById('gamePlayArea');
+            const screenQuestion = document.getElementById('screenQuestionPanel');
+
+            if (screenMode) screenMode.classList.add('hidden');
+            if (gamePlay) gamePlay.classList.remove('hidden');
+            if (screenQuestion) screenQuestion.classList.remove('hidden');
+
+            window.loadCurrentQuestion();
+        };
+
+        window.restartCurrentMode = function() {
+            window.selectGameMode(window.currentMode);
+        };
+
+        window.renderBoardSteps = function() {
+            const container = document.getElementById('boardStepsContainer');
+            if (!container) return;
+            container.innerHTML = '';
+
+            for (let i = 0; i < window.totalSteps; i++) {
+                const isCurrent = i === window.currentStep;
+                const isPassed = i < window.currentStep;
+                const isFinish = i === window.totalSteps - 1;
+
+                const stepDiv = document.createElement('div');
+                stepDiv.className = `relative flex flex-col items-center justify-center w-12 h-16 sm:w-14 sm:h-20 rounded-xl border-2 transition-all ${
+                    isCurrent 
+                        ? 'bg-amber-200 border-amber-500 shadow-lg scale-110' 
+                        : isPassed 
+                        ? 'bg-amber-400/80 border-amber-600 opacity-90' 
+                        : 'bg-amber-100/60 border-amber-300'
+                }`;
+
+                let labelHtml = `<span class="text-xs font-bold ${isCurrent ? 'text-amber-900' : 'text-amber-700'}">${i + 1}</span>`;
+                if (isFinish) {
+                    labelHtml = '<span class="text-xl sm:text-2xl mb-1">⛺</span>';
+                }
+
+                stepDiv.innerHTML = `
+                    <div class="absolute inset-x-1 top-2 h-0.5 bg-amber-800/20"></div>
+                    <div class="absolute inset-x-1 bottom-2 h-0.5 bg-amber-800/20"></div>
+                    ${labelHtml}
+                `;
+
+                if (isCurrent) {
+                    const charElem = document.createElement('div');
+                    charElem.id = 'playerCharacter';
+                    charElem.className = 'absolute -top-7 text-3xl sm:text-4xl transition-all duration-300 floating z-20 drop-shadow-md';
+                    charElem.innerHTML = '🧑‍🦱';
+                    stepDiv.appendChild(charElem);
+                }
+
+                container.appendChild(stepDiv);
+            }
+
+            const stepText = document.getElementById('boardStepText');
+            if (stepText) stepText.innerText = `Langkah: ${window.currentStep + 1} / ${window.totalSteps}`;
+            const progressBar = document.getElementById('gameProgressBar');
+            if (progressBar) progressBar.style.width = `${((window.currentStep + 1) / window.totalSteps) * 100}%`;
+        };
+
+        window.loadCurrentQuestion = function() {
+            if (window.currentStep >= window.totalSteps) {
+                window.showFinalResult();
+                return;
+            }
+
+            window.renderBoardSteps();
+
+            const qData = window.activeQuestions[window.currentStep];
+            const currentStepElem = document.getElementById('currentStepNum');
+            if (currentStepElem) currentStepElem.innerText = window.currentStep + 1;
+
+            const qTypeBadge = document.getElementById('qTypeBadge');
+            const qInstruction = document.getElementById('qInstruction');
+            const listeningControl = document.getElementById('listeningControl');
+            const speakingControl = document.getElementById('speakingControl');
+            const listeningChoicesGrid = document.getElementById('listeningChoicesGrid');
+            const speakingMicArea = document.getElementById('speakingMicArea');
+
+            if (qInstruction) qInstruction.innerText = qData.instruction;
+
+            if (qData.type === 'listening') {
+                if (qTypeBadge) {
+                    qTypeBadge.className = "text-xs font-bold uppercase px-3 py-1 bg-sky-100 text-sky-800 rounded-full border border-sky-200";
+                    qTypeBadge.innerHTML = '🎧 Mod Mendengar';
+                }
+                
+                if (listeningControl) listeningControl.classList.remove('hidden');
+                if (speakingControl) speakingControl.classList.add('hidden');
+                if (listeningChoicesGrid) listeningChoicesGrid.classList.remove('hidden');
+                if (speakingMicArea) speakingMicArea.classList.add('hidden');
+
+                if (listeningChoicesGrid) {
+                    listeningChoicesGrid.innerHTML = '';
+                    qData.options.forEach((opt) => {
+                        const btn = document.createElement('button');
+                        btn.className = "card-bounce bg-white hover:bg-amber-50 border-2 border-amber-200 hover:border-amber-400 p-3 sm:p-4 rounded-2xl shadow-md flex flex-col items-center justify-center text-center transition";
+                        btn.onclick = () => window.handleListeningAnswer(opt.correct);
+                        btn.innerHTML = `
+                            <span class="text-4xl sm:text-5xl mb-2">${opt.emoji}</span>
+                            <span class="font-bold text-slate-700 text-sm sm:text-base">${opt.label}</span>
+                        `;
+                        listeningChoicesGrid.appendChild(btn);
+                    });
+                }
+
+                setTimeout(() => window.playQuestionAudio(), 400);
+
+            } else {
+                if (qTypeBadge) {
+                    qTypeBadge.className = "text-xs font-bold uppercase px-3 py-1 bg-amber-100 text-amber-800 rounded-full border border-amber-200";
+                    qTypeBadge.innerHTML = '🗣️ Mod Bertutur';
+                }
+
+                if (listeningControl) listeningControl.classList.add('hidden');
+                if (speakingControl) speakingControl.classList.remove('hidden');
+                if (listeningChoicesGrid) listeningChoicesGrid.classList.add('hidden');
+                if (speakingMicArea) speakingMicArea.classList.remove('hidden');
+
+                const emojiDisp = document.getElementById('speakEmojiDisplay');
+                if (emojiDisp) emojiDisp.innerText = qData.emoji;
+                const phraseDisp = document.getElementById('targetSpeechPhrase');
+                if (phraseDisp) phraseDisp.innerText = `"${qData.targetPhrase}"`;
+                const recRes = document.getElementById('recognizedResult');
+                if (recRes) recRes.classList.add('hidden');
+            }
+        };
+
+        window.playQuestionAudio = function() {
+            const qData = window.activeQuestions[window.currentStep];
+            if (!qData || !qData.audioText) return;
+
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(qData.audioText);
+                utterance.lang = 'ms-MY';
+                utterance.rate = 0.8; // Kelajuan 0.8 yang lebih perlahan & sebutan lebih jelas untuk murid
+                utterance.pitch = 1.05; // Intonasi mesra kanak-kanak
+                utterance.volume = 1.0;
+
+                const bestVoice = window.getMalayVoice();
+                if (bestVoice) {
+                    utterance.voice = bestVoice;
+                }
+
+                // Tunjukkan teks sari kata visual semasa audio dimainkan
+                window.showAudioSubtitle(qData.audioText);
+
+                window.speechSynthesis.speak(utterance);
+            }
+        };
+
+        window.playTargetSpeechExample = function() {
+            const qData = window.activeQuestions[window.currentStep];
+            if (!qData || !qData.targetPhrase) return;
+
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(qData.targetPhrase);
+                utterance.lang = 'ms-MY';
+                utterance.rate = 0.8;
+                utterance.pitch = 1.05;
+                utterance.volume = 1.0;
+
+                const bestVoice = window.getMalayVoice();
+                if (bestVoice) {
+                    utterance.voice = bestVoice;
+                }
+
+                window.showAudioSubtitle(qData.targetPhrase);
+
+                window.speechSynthesis.speak(utterance);
+            }
+        };
+
+        window.showAudioSubtitle = function(text) {
+            const subtitleBox = document.getElementById('audioSubtitleBox');
+            const subtitleText = document.getElementById('audioSubtitleText');
+            if (subtitleBox && subtitleText) {
+                subtitleText.innerText = `🔊 "${text}"`;
+                subtitleBox.classList.remove('hidden');
+                setTimeout(() => {
+                    subtitleBox.classList.add('hidden');
+                }, 5000);
+            }
+        };
+
+        window.handleListeningAnswer = function(isCorrect) {
+            if (isCorrect) {
+                window.onAnswerSuccess("Jawapan Betul! Watak melompat gembira!");
+            } else {
+                window.onAnswerFailure("Aduh! Tersilap pilih. Watak tergelincir!");
+            }
+        };
+
+        window.onAnswerSuccess = function(message) {
+            window.score += 100;
+            window.stars += 1;
+            const scoreElem = document.getElementById('scoreCount');
+            const starElem = document.getElementById('starCount');
+            if (scoreElem) scoreElem.innerText = window.score;
+            if (starElem) starElem.innerText = window.stars;
+
+            window.playSoundEffect('correct');
+            window.playSoundEffect('star');
+            window.showToast(message, '🎉', 'success');
+
+            const charElem = document.getElementById('playerCharacter');
+            if (charElem) {
+                charElem.classList.remove('floating');
+                charElem.classList.add('char-jump');
+                setTimeout(() => {
+                    charElem.classList.remove('char-jump');
+                    charElem.classList.add('floating');
+                }, 650);
+            }
+
+            setTimeout(() => {
+                window.currentStep++;
+                window.loadCurrentQuestion();
+            }, 1400);
+        };
+
+        window.onAnswerFailure = function(message) {
+            window.playSoundEffect('wrong');
+            window.playSoundEffect('splash');
+            window.showToast(message, '💥', 'error');
+
+            const charElem = document.getElementById('playerCharacter');
+            const playArea = document.getElementById('gamePlayArea');
+
+            if (playArea) {
+                playArea.classList.add('shake-screen');
+                setTimeout(() => playArea.classList.remove('shake-screen'), 450);
+            }
+
+            if (charElem) {
+                charElem.classList.remove('floating');
+                charElem.classList.add('char-fall');
+                window.createSplashEffect(charElem);
+
+                setTimeout(() => {
+                    charElem.classList.remove('char-fall');
+                    charElem.classList.add('floating');
+                }, 850);
+            }
+        };
+
+        window.createSplashEffect = function(element) {
+            if (!element) return;
+            const rect = element.getBoundingClientRect();
+            const splash = document.createElement('div');
+            splash.className = 'splash-ring';
+            splash.style.left = `${rect.left + 10}px`;
+            splash.style.top = `${rect.top + 30}px`;
+            document.body.appendChild(splash);
+
+            setTimeout(() => {
+                if (splash && splash.parentNode) {
+                    splash.parentNode.removeChild(splash);
+                }
+            }, 600);
+        };
+
+        window.showToast = function(message, icon, type) {
+            const toast = document.getElementById('feedbackToast');
+            const iconSpan = document.getElementById('toastIcon');
+            const msgSpan = document.getElementById('toastMessage');
+
+            if (!toast) return;
+
+            if (iconSpan) iconSpan.innerText = icon || '🔔';
+            if (msgSpan) msgSpan.innerText = message;
+
+            if (type === 'success') {
+                toast.className = "fixed bottom-6 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-2xl shadow-2xl font-bold text-white text-center transition-all duration-300 opacity-100 translate-y-0 z-50 flex items-center gap-3 bg-emerald-600 border-2 border-emerald-300";
+            } else {
+                toast.className = "fixed bottom-6 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-2xl shadow-2xl font-bold text-white text-center transition-all duration-300 opacity-100 translate-y-0 z-50 flex items-center gap-3 bg-rose-600 border-2 border-rose-300";
+            }
+
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-4');
+                toast.classList.remove('opacity-100', 'translate-y-0');
+            }, 2000);
+        };
+
+        window.showFinalResult = function() {
+            const gamePlay = document.getElementById('gamePlayArea');
+            const screenRes = document.getElementById('screenResult');
+
+            if (gamePlay) gamePlay.classList.add('hidden');
+            if (screenRes) screenRes.classList.remove('hidden');
+
+            const finalScore = document.getElementById('finalScore');
+            if (finalScore) finalScore.innerText = window.score;
+
+            const starsContainer = document.getElementById('resultStars');
+            if (starsContainer) {
+                starsContainer.innerHTML = '';
+                for (let i = 0; i < Math.min(window.stars, window.totalSteps); i++) {
+                    starsContainer.innerHTML += '<i class="fa-solid fa-star text-amber-400 drop-shadow"></i>';
+                }
+            }
+
+            if (typeof confetti === 'function') {
+                try {
+                    confetti({
+                        particleCount: 120,
+                        spread: 80,
+                        origin: { y: 0.6 }
+                    });
+                } catch(e){}
+            }
+            window.playSoundEffect('star');
+        };
+
+        window.generateCertificate = function() {
+            const inputNameElem = document.getElementById('inputStudentName');
+            const inputClassElem = document.getElementById('inputStudentClass');
+
+            const inputName = inputNameElem ? inputNameElem.value.trim() : "";
+            const inputClass = inputClassElem ? inputClassElem.value.trim() : "";
+
+            if (!inputName) {
+                window.showToast("Sila masukkan nama murid dahulu!", "⚠️", "error");
+                return;
+            }
+
+            const certName = document.getElementById('certStudentName');
+            const certClass = document.getElementById('certStudentClass');
+            if (certName) certName.innerText = inputName;
+            if (certClass) certClass.innerText = inputClass ? inputClass : "Aktiviti Pengukuhan Bahasa Melayu";
+
+            let modeText = "Kemahiran Mendengar";
+            if (window.currentMode === 'speaking') {
+                modeText = "Kemahiran Bertutur";
+            } else if (window.currentMode === 'mixed') {
+                modeText = "Kemahiran Mendengar & Bertutur";
+            }
+            const certMode = document.getElementById('certModeName');
+            if (certMode) certMode.innerText = modeText;
+            const certScore = document.getElementById('certScoreText');
+            if (certScore) certScore.innerText = window.score;
+
+            let starString = "";
+            for (let i = 0; i < Math.min(window.stars, window.totalSteps); i++) {
+                starString += "⭐";
+            }
+            const certStars = document.getElementById('certStarsText');
+            if (certStars) certStars.innerText = starString || "⭐";
+
+            const today = new Date();
+            const dateStr = today.getDate().toString().padStart(2, '0') + '/' + 
+                            (today.getMonth() + 1).toString().padStart(2, '0') + '/' + 
+                            today.getFullYear();
+            const certDate = document.getElementById('certDateText');
+            if (certDate) certDate.innerText = dateStr;
+
+            const certModal = document.getElementById('certificateModal');
+            if (certModal) certModal.classList.remove('hidden');
+            
+            if (typeof confetti === 'function') {
+                try {
+                    confetti({
+                        particleCount: 80,
+                        spread: 60,
+                        origin: { y: 0.5 }
+                    });
+                } catch(e){}
+            }
+        };
+
+        window.printCertificate = function() {
+            window.print();
+        };
+
+        window.closeCertificateModal = function() {
+            const certModal = document.getElementById('certificateModal');
+            if (certModal) certModal.classList.add('hidden');
+        };
+
+        window.onload = function() {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.getVoices();
+                if (window.speechSynthesis.onvoiceschanged !== undefined) {
+                    window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+                }
+            }
+            window.initSpeechRecognition();
+            window.showModeSelect();
+        };
+    </script>
+</head>
+<body class="flex flex-col min-h-screen text-slate-800 p-2 sm:p-4">
+
+    <!-- Background Animated Clouds -->
+    <div class="cloud w-32 h-10 top-6 left-[-100px]" style="animation-delay: 0s;"></div>
+    <div class="cloud w-48 h-12 top-16 left-[-150px]" style="animation-delay: 8s;"></div>
+
+    <!-- Main Header -->
+    <header class="relative z-10 w-full max-w-4xl mx-auto bg-white/95 backdrop-blur-md rounded-2xl p-3 sm:p-4 shadow-xl mb-3 flex flex-wrap justify-between items-center gap-3 border-4 border-amber-300">
+        <div class="flex items-center gap-3">
+            <div class="bg-amber-400 p-2.5 sm:p-3 rounded-2xl text-white text-2xl sm:text-3xl shadow-inner floating">
+                🏖️
+            </div>
+            <div>
+                <h1 class="text-lg sm:text-2xl font-bold font-fredoka text-sky-800 leading-tight">Bercuti di Pantai</h1>
+                <p class="text-xs sm:text-sm text-amber-700 font-semibold">Side Game: Kembara Ke Perkelahan Keluarga</p>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-2 sm:gap-3">
+            <!-- Ambient Beach Sound Toggle Button -->
+            <button id="btnBeachSound" onclick="window.toggleBeachAmbient && window.toggleBeachAmbient()" class="bg-sky-100 hover:bg-sky-200 text-sky-700 px-3 py-2 rounded-xl border border-sky-300 text-xs sm:text-sm font-bold flex items-center gap-2 transition" title="Pasang/Tutup bunyi ombak">
+                <i id="beachSoundIcon" class="fa-solid fa-volume-xmark text-base"></i>
+                <span class="hidden sm:inline">Ombak</span>
+            </button>
+
+            <!-- Mode Switch Button -->
+            <button onclick="window.showModeSelect && window.showModeSelect()" class="bg-amber-100 hover:bg-amber-200 text-amber-800 px-3 py-2 rounded-xl border border-amber-300 text-xs sm:text-sm font-bold flex items-center gap-1.5 transition" title="Tukar Mod Kemahiran">
+                <i class="fa-solid fa-list-check"></i>
+                <span class="hidden sm:inline">Tukar Mod</span>
+            </button>
+
+            <!-- Score & Star Badges -->
+            <div class="flex items-center gap-3 bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-200">
+                <div class="flex items-center gap-1 text-amber-500 font-bold text-sm sm:text-base">
+                    <i class="fa-solid fa-star text-amber-400 text-lg drop-shadow"></i>
+                    <span id="starCount">0</span>
+                </div>
+                <div class="h-4 w-px bg-amber-200"></div>
+                <div class="text-slate-700 font-bold text-xs sm:text-sm">
+                    Skor: <span id="scoreCount" class="text-sky-600">0</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main id="mainContainer" class="relative z-10 w-full max-w-4xl mx-auto flex-1 flex flex-col justify-center">
+
+        <!-- MODE SELECTION SCREEN -->
+        <div id="screenModeSelect" class="bg-white/95 backdrop-blur rounded-3xl p-6 sm:p-8 shadow-2xl border-4 border-amber-300 text-center mb-3">
+            <div class="text-5xl sm:text-6xl mb-3 floating">🏖️️🏖️</div>
+            <h2 class="text-2xl sm:text-3xl font-bold font-fredoka text-sky-900 mb-2">Pilih Mod Kemahiran</h2>
+            <p class="text-slate-600 mb-6 text-sm sm:text-base font-semibold">Sila pilih fokus kemahiran Bahasa Melayu yang ingin dilatih hari ini:</p>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl mx-auto">
+                <!-- Mode 1: Mendengar Only -->
+                <button onclick="window.selectGameMode && window.selectGameMode('listening')" class="card-bounce bg-gradient-to-b from-sky-50 to-sky-100 hover:from-sky-100 hover:to-sky-200 border-3 border-sky-400 p-5 rounded-2xl shadow-lg text-center flex flex-col items-center justify-between transition group">
+                    <div class="w-16 h-16 bg-sky-500 text-white rounded-full flex items-center justify-center text-3xl shadow-md mb-3 group-hover:scale-110 transition-transform">
+                        🎧
+                    </div>
+                    <div>
+                        <h3 class="font-fredoka text-lg font-bold text-sky-900 mb-1">Kemahiran Mendengar</h3>
+                        <p class="text-xs text-sky-700 font-medium">Dengar petunjuk audio percutian & pilih gambar yang tepat.</p>
+                    </div>
+                    <span class="mt-4 inline-block bg-sky-600 text-white text-xs font-bold px-4 py-1.5 rounded-full shadow">Mula Mod Mendengar</span>
+                </button>
+
+                <!-- Mode 2: Bertutur Only -->
+                <button onclick="window.selectGameMode && window.selectGameMode('speaking')" class="card-bounce bg-gradient-to-b from-amber-50 to-amber-100 hover:from-amber-100 hover:to-amber-200 border-3 border-amber-400 p-5 rounded-2xl shadow-lg text-center flex flex-col items-center justify-between transition group">
+                    <div class="w-16 h-16 bg-amber-500 text-white rounded-full flex items-center justify-center text-3xl shadow-md mb-3 group-hover:scale-110 transition-transform">
+                        🗣️
+                    </div>
+                    <div>
+                        <h3 class="font-fredoka text-lg font-bold text-amber-900 mb-1">Kemahiran Bertutur</h3>
+                        <p class="text-xs text-amber-800 font-medium">Sebut frasa & aktiviti pantai guna mikrofon secara jelas.</p>
+                    </div>
+                    <span class="mt-4 inline-block bg-amber-600 text-white text-xs font-bold px-4 py-1.5 rounded-full shadow">Mula Mod Bertutur</span>
+                </button>
+
+                <!-- Mode 3: Mixed Both -->
+                <button onclick="window.selectGameMode && window.selectGameMode('mixed')" class="card-bounce bg-gradient-to-b from-emerald-50 to-emerald-100 hover:from-emerald-100 hover:to-emerald-200 border-3 border-emerald-400 p-5 rounded-2xl shadow-lg text-center flex flex-col items-center justify-between transition group">
+                    <div class="w-16 h-16 bg-emerald-500 text-white rounded-full flex items-center justify-center text-3xl shadow-md mb-3 group-hover:scale-110 transition-transform">
+                        🔀
+                    </div>
+                    <div>
+                        <h3 class="font-fredoka text-lg font-bold text-emerald-900 mb-1">Mod Campuran</h3>
+                        <p class="text-xs text-emerald-800 font-medium">Cabaran gabungan kemahiran Mendengar & Bertutur.</p>
+                    </div>
+                    <span class="mt-4 inline-block bg-emerald-600 text-white text-xs font-bold px-4 py-1.5 rounded-full shadow">Mula Mod Campuran</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- SIDE GAME & QUESTION AREA (Hidden initially) -->
+        <div id="gamePlayArea" class="hidden">
+            <!-- SIDE GAME: BEACH RUNNER BOARDWALK TRAIL -->
+            <div class="bg-sky-500/20 backdrop-blur-md rounded-3xl p-3 sm:p-5 shadow-2xl border-4 border-amber-300 mb-3 relative overflow-hidden">
+                
+                <!-- Progress Header Info -->
+                <div class="flex justify-between items-center mb-2 px-2">
+                    <span id="modeTitleBadge" class="text-xs font-bold uppercase tracking-wider text-sky-900 bg-white/80 px-3 py-1 rounded-full shadow-sm">
+                        🚩 Kemahiran Mendengar
+                    </span>
+                    <span id="boardStepText" class="text-xs sm:text-sm font-black text-amber-900 bg-amber-200 px-3 py-1 rounded-full border border-amber-300">
+                        Langkah: 1 / 6
+                    </span>
+                </div>
+
+                <!-- Boardwalk Trail Grid & Character Stage -->
+                <div class="relative bg-gradient-to-r from-sky-300 via-blue-400 to-amber-200 rounded-2xl p-4 shadow-inner border-2 border-sky-400 min-h-[150px] flex items-center overflow-x-auto">
+                    
+                    <!-- Sea Water Layer Background -->
+                    <div class="absolute inset-0 bg-blue-500/10 pointer-events-none"></div>
+
+                    <!-- Path Steps Container -->
+                    <div class="flex justify-between items-center w-full min-w-[650px] relative z-10 px-2" id="boardStepsContainer">
+                        <!-- Dynamic Tiles Generated via JS -->
+                    </div>
+                </div>
+                
+                <!-- Overall Progress Bar -->
+                <div class="w-full bg-white/60 rounded-full h-3 mt-3 p-0.5 border border-sky-300">
+                    <div id="gameProgressBar" class="bg-gradient-to-r from-amber-400 to-amber-500 h-full rounded-full transition-all duration-500 w-[12%]"></div>
+                </div>
+            </div>
+
+            <!-- QUESTION & INTERACTION PANEL -->
+            <div id="screenQuestionPanel" class="bg-white/95 backdrop-blur rounded-3xl p-4 sm:p-6 shadow-2xl border-4 border-amber-300">
+                
+                <div class="flex justify-between items-center mb-3">
+                    <span id="qTypeBadge" class="text-xs font-bold uppercase px-3 py-1 bg-sky-100 text-sky-800 rounded-full border border-sky-200">
+                        🎧 Mod Mendengar
+                    </span>
+                    <span class="text-xs font-bold text-slate-500">
+                        Soalan <span id="currentStepNum">1</span> daripada <span id="totalStepNum">6</span>
+                    </span>
+                </div>
+
+                <!-- Question Instruction Header -->
+                <div class="bg-gradient-to-r from-amber-50 via-sky-50 to-amber-50 border-2 border-amber-200 rounded-2xl p-4 text-center mb-4 shadow-inner">
+                    <p id="qInstruction" class="text-sm sm:text-base font-bold text-slate-700 mb-2">Dengar petunjuk audio pantai di bawah:</p>
+
+                    <!-- Visual Subtitle Box for Audio Clarity -->
+                    <div id="audioSubtitleBox" class="hidden mb-3 bg-amber-100 border-2 border-amber-300 text-amber-950 font-bold p-2.5 rounded-xl text-xs sm:text-sm animate-pulse shadow-sm">
+                        <span id="audioSubtitleText">🔊 "..."</span>
+                    </div>
+                    
+                    <!-- Listening Question Controls -->
+                    <div id="listeningControl" class="my-2">
+                        <button id="btnPlayAudio" onclick="window.playQuestionAudio && window.playQuestionAudio()" class="card-bounce bg-sky-500 hover:bg-sky-600 text-white font-bold py-2.5 px-6 rounded-full shadow-md flex items-center justify-center gap-2 mx-auto text-sm sm:text-base border-2 border-sky-200">
+                            <i class="fa-solid fa-volume-high text-lg"></i>
+                            <span>Dengar Petunjuk Audio</span>
+                        </button>
+                    </div>
+
+                    <!-- Speaking Question Display -->
+                    <div id="speakingControl" class="hidden my-2">
+                        <div id="speakEmojiDisplay" class="text-5xl mb-2 floating">🏰</div>
+                        <div class="bg-white p-3 rounded-xl border border-amber-300 shadow-sm max-w-md mx-auto mb-2">
+                            <p id="targetSpeechPhrase" class="text-lg sm:text-xl font-fredoka text-amber-900 font-bold">
+                                "Saya membina istana pasir."
+                            </p>
+                        </div>
+                        <button onclick="window.playTargetSpeechExample && window.playTargetSpeechExample()" class="text-xs text-sky-700 hover:underline font-bold inline-flex items-center gap-1">
+                            <i class="fa-solid fa-volume-high"></i> Dengar Contoh Sebutan
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Listening Multiple Choice Grid -->
+                <div id="listeningChoicesGrid" class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <!-- Choices Rendered via JS -->
+                </div>
+
+                <!-- Speaking Microphone Interactive Panel -->
+                <div id="speakingMicArea" class="hidden text-center py-2">
+                    <button id="btnStartRec" onclick="window.toggleSpeechRecognition && window.toggleSpeechRecognition()" class="w-16 h-16 sm:w-20 sm:h-20 bg-rose-500 hover:bg-rose-600 text-white rounded-full flex items-center justify-center text-2xl sm:text-3xl mx-auto shadow-xl transition-all relative border-4 border-rose-200">
+                        <i id="micIcon" class="fa-solid fa-microphone"></i>
+                    </button>
+                    <p id="micStatusText" class="text-xs sm:text-sm font-bold text-slate-700 mt-2">Tekan mikrofon & bercakap</p>
+                    
+                    <!-- Fallback Button for speech simulation -->
+                    <button onclick="window.simulateSpeechResult && window.simulateSpeechResult()" class="mt-2 text-xs font-bold text-amber-700 hover:text-amber-900 underline block mx-auto">
+                        (Klik Sini Untuk Simulasi Sebutan Betul / Tanpa Mikrofon)
+                    </button>
+
+                    <div id="recognizedResult" class="mt-3 text-xs sm:text-sm italic font-semibold text-sky-800 bg-sky-50 px-3 py-1.5 rounded-xl max-w-md mx-auto hidden border border-sky-300">
+                        Pengesanan Suara: "<span id="speechTextOutput">...</span>"
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- FINAL COMPLETION SCREEN -->
+        <div id="screenResult" class="hidden bg-white/95 backdrop-blur rounded-3xl p-6 sm:p-8 shadow-2xl border-4 border-amber-300 text-center">
+            <div class="text-7xl mb-3 floating">🏝⛺🎉</div>
+            <h2 class="text-2xl sm:text-3xl font-bold font-fredoka text-sky-900 mb-2">Tahniah! Sampai di Kem Perkelahan Pantai!</h2>
+            <p class="text-slate-600 mb-4 text-sm sm:text-base font-semibold">Anda berjaya menyelesaikan latihan kemahiran ini dengan cemerlang!</p>
+
+            <div class="bg-amber-50 border-2 border-amber-300 rounded-2xl p-5 max-w-sm mx-auto mb-5 shadow-md">
+                <div class="text-amber-400 text-4xl mb-2 flex justify-center gap-2 drop-shadow" id="resultStars">
+                    <!-- Stars via JS -->
+                </div>
+                <p class="text-slate-700 font-bold text-base mt-1">Jumlah Skor Akhir: <span id="finalScore" class="text-sky-600 text-3xl font-black">0</span></p>
+            </div>
+
+            <!-- Student Name Input Form for Certificate -->
+            <div class="bg-sky-50 border-2 border-sky-200 rounded-2xl p-4 sm:p-5 max-w-md mx-auto mb-6 shadow-sm text-left">
+                <h3 class="font-fredoka text-sky-900 font-bold text-base sm:text-lg mb-2 text-center flex items-center justify-center gap-2">
+                    <span>📜</span> Dapatkan Sijil Pengiktirafan
+                </h3>
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Nama Murid:</label>
+                        <input type="text" id="inputStudentName" placeholder="Contoh: Muhammad Ali bin Ahmad" class="w-full px-3 py-2 rounded-xl border-2 border-sky-300 focus:outline-none focus:border-sky-500 font-semibold text-slate-800 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Kelas / Sekolah (Opsional):</label>
+                        <input type="text" id="inputStudentClass" placeholder="Contoh: 3 Cemerlang - SK Pantai Indah" class="w-full px-3 py-2 rounded-xl border-2 border-sky-300 focus:outline-none focus:border-sky-500 font-semibold text-slate-800 text-sm">
+                    </div>
+                    <button onclick="window.generateCertificate && window.generateCertificate()" class="w-full card-bounce bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2.5 px-4 rounded-xl shadow-md border-2 border-emerald-300 flex items-center justify-center gap-2 text-sm transition">
+                        <i class="fa-solid fa-award text-lg"></i>
+                        <span>Jana Sijil Pengiktirafan</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap justify-center gap-3">
+                <button onclick="window.restartCurrentMode && window.restartCurrentMode()" class="card-bounce bg-sky-500 hover:bg-sky-600 text-white font-bold py-3 px-6 rounded-2xl shadow-lg border-2 border-sky-300 inline-flex items-center gap-2 text-sm sm:text-base">
+                    <i class="fa-solid fa-rotate-right"></i> Main Semula Mod Ini
+                </button>
+                <button onclick="window.showModeSelect && window.showModeSelect()" class="card-bounce bg-amber-500 hover:bg-amber-600 text-white font-bold py-3 px-6 rounded-2xl shadow-lg border-2 border-amber-300 inline-flex items-center gap-2 text-sm sm:text-base">
+                    <i class="fa-solid fa-list-check"></i> Pilih Mod Lain
+                </button>
+            </div>
+        </div>
+
+        <!-- CERTIFICATE MODAL DISPLAY -->
+        <div id="certificateModal" class="hidden fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+            <div class="relative w-full max-w-3xl bg-white rounded-3xl p-2 sm:p-4 shadow-2xl">
+                
+                <!-- Certificate Card Printable Content -->
+                <div id="certificatePrintArea" class="bg-gradient-to-br from-amber-50 via-white to-sky-50 p-6 sm:p-10 rounded-2xl border-8 border-amber-400 relative text-center shadow-inner overflow-hidden">
+                    
+                    <!-- Decorative Corner Icons -->
+                    <div class="absolute top-3 left-3 text-2xl sm:text-4xl text-amber-500">🏖️</div>
+                    <div class="absolute top-3 right-3 text-2xl sm:text-4xl text-amber-500">🌴</div>
+                    <div class="absolute bottom-3 left-3 text-2xl sm:text-4xl text-amber-500">🐚</div>
+                    <div class="absolute bottom-3 right-3 text-2xl sm:text-4xl text-amber-500">⛺</div>
+
+                    <!-- Inner Border Frame -->
+                    <div class="border-2 border-dashed border-amber-300 p-4 sm:p-8 rounded-xl">
+                        <div class="text-4xl sm:text-5xl mb-1">🏅</div>
+                        <h1 class="text-2xl sm:text-4xl font-black font-fredoka text-amber-800 uppercase tracking-wide">Sijil Pengiktirafan</h1>
+                        <p class="text-xs sm:text-sm font-bold text-sky-700 tracking-wider uppercase mb-4">Kembara Bahasa Melayu: Bercuti Bersama Keluarga</p>
+
+                        <p class="text-xs sm:text-sm text-slate-600 italic mb-2">Dengan ini diperakui bahawa</p>
+                        
+                        <div class="my-3 py-2 border-b-2 border-amber-400 max-w-xl mx-auto">
+                            <h2 id="certStudentName" class="text-xl sm:text-3xl font-extrabold font-fredoka text-sky-900 capitalize">
+                                Nama Murid
+                            </h2>
+                        </div>
+                        
+                        <p id="certStudentClass" class="text-xs sm:text-sm font-semibold text-slate-700 mb-4">
+                            Kelas / Sekolah
+                        </p>
+
+                        <p class="text-xs sm:text-base text-slate-700 max-w-xl mx-auto leading-relaxed mb-6 font-medium">
+                            telah berjaya menyempurnakan cabaran pembelajaran bagi <span id="certModeName" class="font-bold text-amber-800">Kemahiran Mendengar</span> dengan keputusan cemerlang!
+                        </p>
+
+                        <!-- Certificate Score Stats Badges -->
+                        <div class="flex justify-center items-center gap-4 sm:gap-8 mb-6">
+                            <div class="bg-amber-100/80 border border-amber-300 px-4 py-2 rounded-xl text-center">
+                                <span class="block text-[10px] sm:text-xs text-amber-800 font-bold uppercase">Markah Skor</span>
+                                <span id="certScoreText" class="text-lg sm:text-2xl font-black text-amber-900">600</span>
+                            </div>
+                            <div class="bg-sky-100/80 border border-sky-300 px-4 py-2 rounded-xl text-center">
+                                <span class="block text-[10px] sm:text-xs text-sky-800 font-bold uppercase">Bintang Diraih</span>
+                                <span id="certStarsText" class="text-lg sm:text-2xl font-black text-sky-900">⭐⭐⭐⭐⭐⭐</span>
+                            </div>
+                        </div>
+
+                        <!-- Date & Seal Signature Line -->
+                        <div class="flex justify-between items-end mt-8 pt-4 border-t border-slate-200 text-xs text-slate-600">
+                            <div class="text-left">
+                                <span class="block font-bold">Tarikh Dikeluarkan:</span>
+                                <span id="certDateText" class="font-semibold text-slate-800">01/01/2026</span>
+                            </div>
+                            <div class="text-center">
+                                <div class="w-12 h-12 bg-amber-400 text-white rounded-full flex items-center justify-center text-xl mx-auto mb-1 shadow-md">
+                                    ★
+                                </div>
+                                <span class="block font-bold text-[10px] text-amber-900 uppercase">Anugerah Cemerlang</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Controls (Hidden during print) -->
+                <div class="no-print mt-4 flex flex-wrap justify-center gap-3">
+                    <button onclick="window.printCertificate && window.printCertificate()" class="card-bounce bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2.5 px-6 rounded-2xl shadow-lg border-2 border-emerald-300 inline-flex items-center gap-2 text-sm sm:text-base">
+                        <i class="fa-solid fa-print"></i> Cetak Sijil / Simpan PDF
+                    </button>
+                    <button onclick="window.closeCertificateModal && window.closeCertificateModal()" class="card-bounce bg-slate-500 hover:bg-slate-600 text-white font-bold py-2.5 px-6 rounded-2xl shadow-lg border-2 border-slate-300 inline-flex items-center gap-2 text-sm sm:text-base">
+                        <i class="fa-solid fa-xmark"></i> Tutup Sijil
+                    </button>
+                </div>
+
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Toast Notification for Feedback -->
+    <div id="feedbackToast" class="fixed bottom-6 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-2xl shadow-2xl font-bold text-white text-center transition-all duration-300 opacity-0 pointer-events-none translate-y-4 z-50 flex items-center gap-3">
+        <span id="toastIcon" class="text-2xl"></span>
+        <span id="toastMessage"></span>
+    </div>
+
+</body>
+</html>
